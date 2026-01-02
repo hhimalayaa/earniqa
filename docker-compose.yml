@@ -1,0 +1,114 @@
+version: '3.8'
+
+services:
+  # Database Migration Service (runs once to set up schema)
+  migrate:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      args:
+        SERVICE: migrate
+    container_name: earniqa-migrate
+    environment:
+      - DB_DRIVER=mysql
+      - MYSQL_DSN=earniqa:earniqa@tcp(db:3306)/earniqa?parseTime=true&loc=Local&charset=utf8mb4&collation=utf8mb4_unicode_ci
+    networks:
+      - earniqa-network
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+    command: /app/service
+
+  # Backend API Service (Go API Gateway)
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      args:
+        SERVICE: api-gateway
+    container_name: earniqa-backend
+    ports:
+      - "8080:8080"
+    environment:
+      - DB_DRIVER=mysql
+      - MYSQL_DSN=earniqa:earniqa@tcp(db:3306)/earniqa?parseTime=true&loc=Local&charset=utf8mb4&collation=utf8mb4_unicode_ci
+      - NATS_URL=nats://nats:4222
+      - JWT_SECRET=supersecretjwt
+      - PORT=8080
+      # Add your backend environment variables here
+      # - STRIPE_SECRET_KEY=your-stripe-key
+      # - STRIPE_WEBHOOK_SECRET=your-webhook-secret
+      # - TELEGRAM_BOT_TOKEN=your-telegram-token
+    networks:
+      - earniqa-network
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      db:
+        condition: service_healthy
+      nats:
+        condition: service_started
+
+  # Frontend Service (Production)
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: earniqa-frontend
+    ports:
+      - "3000:80"
+    environment:
+      # In production, use backend service name for API calls
+      # Note: Vite uses VITE_ prefix for environment variables
+      - VITE_API_BASE_URL=http://backend:8080
+    networks:
+      - earniqa-network
+    depends_on:
+      backend:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # MySQL Database
+  db:
+    image: mysql:8
+    container_name: earniqa-mysql
+    environment:
+      - MYSQL_ROOT_PASSWORD=root
+      - MYSQL_DATABASE=earniqa
+      - MYSQL_USER=earniqa
+      - MYSQL_PASSWORD=earniqa
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    networks:
+      - earniqa-network
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-proot"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  # NATS Server (with JetStream enabled)
+  nats:
+    image: nats:2
+    container_name: earniqa-nats
+    command: ["-js"]
+    ports:
+      - "4222:4222"
+    networks:
+      - earniqa-network
+
+networks:
+  earniqa-network:
+    driver: bridge
+
+volumes:
+  mysql_data:
+

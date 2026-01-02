@@ -1,0 +1,28 @@
+# Docker
+*.log
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Cloned repositories (when using Makefile approach)
+# These directories are cloned automatically by the Makefile
+frontend/
+backend/
+
+# Note: If you want to use git submodules instead, uncomment the above and use:
+# git submodule add <repo-url> frontend
+# git submodule add <repo-url> backend
+

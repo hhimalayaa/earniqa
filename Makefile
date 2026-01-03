@@ -55,7 +55,7 @@ ensure-backend: ## Ensure backend repository is cloned
 
 ensure-repos: ensure-frontend ensure-backend ## Ensure both repositories are cloned
 
-docker-up: ensure-repos ## Start all services with Docker Compose
+docker-up: ensure-repos ## Start all services with Docker Compose (production)
 	@echo "Starting all services..."
 	docker-compose up -d
 	@echo ""
@@ -67,7 +67,19 @@ docker-up: ensure-repos ## Start all services with Docker Compose
 	@echo ""
 	@echo "View logs: make docker-logs"
 
-docker-up-build: ensure-repos ## Build and start all services
+docker-up-dev: ensure-repos ## Start all services in development mode with hot reload
+	@echo "Starting all services in development mode..."
+	docker-compose -f docker-compose.dev.yml up --build -d
+	@echo ""
+	@echo "Development services started!"
+	@echo "  Frontend: http://localhost:5173 (Vite dev server with hot reload)"
+	@echo "  Backend:  http://localhost:8080 (Air hot reload enabled)"
+	@echo "  Database: localhost:3306"
+	@echo "  NATS:     localhost:4222"
+	@echo ""
+	@echo "View logs: make docker-logs-dev"
+
+docker-up-build: ensure-repos ## Build and start all services (production)
 	@echo "Building and starting all services..."
 	docker-compose up --build -d
 	@echo ""
@@ -77,28 +89,46 @@ docker-up-build: ensure-repos ## Build and start all services
 	@echo "  Database: localhost:3306"
 	@echo "  NATS:     localhost:4222"
 
-docker-down: ## Stop all services
+docker-down: ## Stop all services (production)
 	docker-compose down
 
-docker-build: ensure-repos ## Build all Docker images
+docker-down-dev: ## Stop all development services
+	docker-compose -f docker-compose.dev.yml down
+
+docker-build: ensure-repos ## Build all Docker images (production)
 	docker-compose build
 
-docker-logs: ## View logs from all services
+docker-build-dev: ensure-repos ## Build all Docker images (development)
+	docker-compose -f docker-compose.dev.yml build
+
+docker-logs: ## View logs from all services (production)
 	docker-compose logs -f
 
-docker-logs-frontend: ## View frontend logs
+docker-logs-dev: ## View logs from all development services
+	docker-compose -f docker-compose.dev.yml logs -f
+
+docker-logs-frontend: ## View frontend logs (production)
 	docker-compose logs -f frontend
 
-docker-logs-backend: ## View backend logs
+docker-logs-frontend-dev: ## View frontend development logs
+	docker-compose -f docker-compose.dev.yml logs -f frontend
+
+docker-logs-backend: ## View backend logs (production)
 	docker-compose logs -f backend
+
+docker-logs-backend-dev: ## View backend development logs (with Air output)
+	docker-compose -f docker-compose.dev.yml logs -f backend
 
 docker-logs-db: ## View database logs
 	docker-compose logs -f db
 
-docker-restart: ## Restart all services
+docker-restart: ## Restart all services (production)
 	docker-compose restart
 
-docker-clean: ## Stop and remove all containers, volumes, and networks
+docker-restart-dev: ## Restart all development services
+	docker-compose -f docker-compose.dev.yml restart
+
+docker-clean: ## Stop and remove all containers, volumes, and networks (production)
 	docker-compose down -v
 	@echo "Docker resources cleaned up"
 

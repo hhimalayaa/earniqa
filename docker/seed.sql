@@ -7,8 +7,8 @@
 -- ============================================================================
 INSERT INTO `admins` (`email`, `password_hash`, `is_super_admin`, `status`, `created_at`, `updated_at`)
 VALUES 
-    ('admin@earniqa.com', '$2a$10$uhQhKJjz.2V2/mSDylx4iuAeUGYUw0f3AWb.yot7pdWilGNw.CXmC', true, 'active', NOW(), NOW()),
-    ('admin2@earniqa.com', '$2a$10$uhQhKJjz.2V2/mSDylx4iuAeUGYUw0f3AWb.yot7pdWilGNw.CXmC', false, 'active', NOW(), NOW())
+    ('admin@earniqa.com', '$2a$10$do9lLU03kQNN.3qr/J5W7uwqUpi7vNmbA3vbnCr5/eGfGsogAXprm', true, 'active', NOW(), NOW()),
+    ('admin2@earniqa.com', '$2a$10$do9lLU03kQNN.3qr/J5W7uwqUpi7vNmbA3vbnCr5/eGfGsogAXprm', false, 'active', NOW(), NOW())
 ON DUPLICATE KEY UPDATE `updated_at` = NOW();
 
 

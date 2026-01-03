@@ -22,14 +22,12 @@ services:
     volumes:
       - ./docker/seed.sql:/seed.sql:ro
 
-  # Backend API Service (Go API Gateway)
+  # Backend API Service (Go API Gateway with Air hot reload)
   backend:
     build:
       context: ./backend
-      dockerfile: Dockerfile
-      args:
-        SERVICE: api-gateway
-    container_name: earniqa-backend
+      dockerfile: Dockerfile.dev
+    container_name: earniqa-backend-dev
     ports:
       - "8080:8080"
     environment:
@@ -38,10 +36,21 @@ services:
       - NATS_URL=nats://nats:4222
       - JWT_SECRET=supersecretjwt
       - PORT=8080
-      # Add your backend environment variables here
-      # - STRIPE_SECRET_KEY=your-stripe-key
-      # - STRIPE_WEBHOOK_SECRET=your-webhook-secret
-      # - TELEGRAM_BOT_TOKEN=your-telegram-token
+      # Stripe Connect configuration (optional - set these for Stripe integration)
+      # These values come from .env file (copy .env.example to .env and fill in your values)
+      - BACKEND_BASE_URL=${BACKEND_BASE_URL:-http://localhost:8080}
+      - STRIPE_CONNECT_CLIENT_ID=${STRIPE_CONNECT_CLIENT_ID:-}
+      - STRIPE_WEBHOOK_SECRET=${STRIPE_WEBHOOK_SECRET:-}
+      - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY:-}
+      - STRIPE_CONNECT_REDIRECT=${STRIPE_CONNECT_REDIRECT:-http://localhost:8080/integrations/connect/stripe/callback}
+      - FRONTEND_URL=${FRONTEND_URL:-http://localhost:5173}
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
+    volumes:
+      # Mount source code for hot reload
+      - ./backend:/app
+      # Exclude tmp and vendor directories
+      - /app/tmp
+      - /app/vendor
     networks:
       - earniqa-network
     depends_on:
@@ -51,26 +60,30 @@ services:
         condition: service_healthy
       nats:
         condition: service_started
+    command: air -c .air.toml
 
-  # Frontend Service (Production)
+  # Frontend Service (Development mode with Vite hot reload)
   frontend:
     build:
       context: ./frontend
-      dockerfile: Dockerfile
-    container_name: earniqa-frontend
+      dockerfile: Dockerfile.dev
+    container_name: earniqa-frontend-dev
     ports:
-      - "3000:80"
+      - "5173:5173"
     environment:
-      # In production, use backend service name for API calls
-      # Note: Vite uses VITE_ prefix for environment variables
-      - VITE_API_BASE_URL=http://backend:8080
+      - VITE_API_BASE_URL=${VITE_API_BASE_URL:-http://localhost:8080}
+    volumes:
+      # Mount source code for hot reload
+      - ./frontend:/app
+      - /app/node_modules
+      - /app/dist
     networks:
       - earniqa-network
     depends_on:
       backend:
         condition: service_started
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:80/"]
+      test: ["CMD", "curl", "-f", "http://localhost:5173/"]
       interval: 30s
       timeout: 10s
       retries: 3

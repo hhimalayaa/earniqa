@@ -30,6 +30,13 @@ services:
     container_name: earniqa-backend-dev
     ports:
       - "8080:8080"
+    # Resource limits - increased for Go compilation
+    deploy:
+      resources:
+        limits:
+          memory: 3G
+        reservations:
+          memory: 2G
     environment:
       - DB_DRIVER=mysql
       - MYSQL_DSN=earniqa:earniqa@tcp(db:3306)/earniqa?parseTime=true&loc=Local&charset=utf8mb4&collation=utf8mb4_unicode_ci
@@ -38,19 +45,24 @@ services:
       - PORT=8080
       # Stripe Connect configuration (optional - set these for Stripe integration)
       # These values come from .env file (copy .env.example to .env and fill in your values)
-      - BACKEND_BASE_URL=${BACKEND_BASE_URL:-http://localhost:8080}
+      - BACKEND_BASE_URL=${BACKEND_BASE_URL:-https://rarest-uniaxially-altha.ngrok-free.dev}
       - STRIPE_CONNECT_CLIENT_ID=${STRIPE_CONNECT_CLIENT_ID:-}
       - STRIPE_WEBHOOK_SECRET=${STRIPE_WEBHOOK_SECRET:-}
       - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY:-}
+      - STRIPE_PRICE_PRIME_MONTH=${STRIPE_PRICE_PRIME_MONTH:-}
+      - STRIPE_PRICE_PRO_MONTH=${STRIPE_PRICE_PRO_MONTH:-}
       - STRIPE_CONNECT_REDIRECT=${STRIPE_CONNECT_REDIRECT:-http://localhost:8080/integrations/connect/stripe/callback}
       - FRONTEND_URL=${FRONTEND_URL:-http://localhost:5173}
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
+      - STORAGE_PATH=/app/storage
     volumes:
       # Mount source code for hot reload
       - ./backend:/app
       # Exclude tmp and vendor directories
       - /app/tmp
       - /app/vendor
+      # Persistent storage for uploaded images
+      - storage_data:/app/storage
     networks:
       - earniqa-network
     depends_on:
@@ -70,6 +82,13 @@ services:
     container_name: earniqa-frontend-dev
     ports:
       - "5173:5173"
+    # Resource limits for 8GB RAM Mac
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+        reservations:
+          memory: 512M
     environment:
       - VITE_API_BASE_URL=${VITE_API_BASE_URL:-http://localhost:8080}
     volumes:
@@ -104,11 +123,20 @@ services:
       - mysql_data:/var/lib/mysql
     networks:
       - earniqa-network
+    # Optimized healthcheck - faster startup (30s max instead of 100s)
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-proot"]
-      interval: 5s
-      timeout: 3s
-      retries: 20
+      interval: 3s
+      timeout: 2s
+      retries: 10
+      start_period: 5s
+    # Resource limits for 8GB RAM Mac
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 256M
 
   # NATS Server (with JetStream enabled)
   nats:
@@ -119,6 +147,227 @@ services:
       - "4222:4222"
     networks:
       - earniqa-network
+    # Resource limits for 8GB RAM Mac
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+        reservations:
+          memory: 64M
+
+  # Access Worker (processes payment events and updates database)
+  access-worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.dev
+    container_name: earniqa-access-worker-dev
+    environment:
+      - DB_DRIVER=mysql
+      - MYSQL_DSN=earniqa:earniqa@tcp(db:3306)/earniqa?parseTime=true&loc=Local&charset=utf8mb4&collation=utf8mb4_unicode_ci
+      - NATS_URL=nats://nats:4222
+      - JWT_SECRET=supersecretjwt
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
+      - TELEGRAM_BOT_USERNAME=${TELEGRAM_BOT_USERNAME:-}
+      - SMTP_HOST=${SMTP_HOST:-}
+      - SMTP_PORT=${SMTP_PORT:-}
+      - SMTP_USER=${SMTP_USER:-}
+      - SMTP_PASS=${SMTP_PASS:-}
+      - EMAIL_FROM_ADDR=${EMAIL_FROM_ADDR:-}
+      - EMAIL_FROM_NAME=${EMAIL_FROM_NAME:-}
+    volumes:
+      # Mount source code for hot reload
+      - ./backend:/app
+      - /app/tmp
+      - /app/vendor
+    networks:
+      - earniqa-network
+    depends_on:
+      db:
+        condition: service_healthy
+      nats:
+        condition: service_started
+      migrate:
+        condition: service_completed_successfully
+    command: air -c .air.access-worker.toml
+    restart: unless-stopped
+    # Resource limits for 8GB RAM Mac
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 256M
+
+  # Notification Worker (sends email notifications for payment events and processes scheduled posts)
+  notification-worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.dev
+    container_name: earniqa-notification-worker-dev
+    environment:
+      - DB_DRIVER=mysql
+      - MYSQL_DSN=earniqa:earniqa@tcp(db:3306)/earniqa?parseTime=true&loc=Local&charset=utf8mb4&collation=utf8mb4_unicode_ci
+      - NATS_URL=nats://nats:4222
+      - JWT_SECRET=supersecretjwt
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
+      - DISCORD_BOT_TOKEN=${DISCORD_BOT_TOKEN:-}
+      - SMTP_HOST=${SMTP_HOST:-}
+      - SMTP_PORT=${SMTP_PORT:-}
+      - SMTP_USER=${SMTP_USER:-}
+      - SMTP_PASS=${SMTP_PASS:-}
+      - EMAIL_FROM_ADDR=${EMAIL_FROM_ADDR:-}
+      - EMAIL_FROM_NAME=${EMAIL_FROM_NAME:-}
+      - BACKEND_BASE_URL=${BACKEND_BASE_URL:-http://localhost:8080}
+    volumes:
+      # Mount source code for hot reload
+      - ./backend:/app
+      - /app/tmp
+      - /app/vendor
+    networks:
+      - earniqa-network
+    depends_on:
+      db:
+        condition: service_healthy
+      nats:
+        condition: service_started
+      migrate:
+        condition: service_completed_successfully
+    command: air -c .air.notification-worker.toml
+    restart: unless-stopped
+    # Resource limits for 8GB RAM Mac
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 256M
+
+  # Dunning Worker (handles payment failures and retries, manages dunning/recovery)
+  dunning-worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.dev
+    container_name: earniqa-dunning-worker-dev
+    environment:
+      - DB_DRIVER=mysql
+      - MYSQL_DSN=earniqa:earniqa@tcp(db:3306)/earniqa?parseTime=true&loc=Local&charset=utf8mb4&collation=utf8mb4_unicode_ci
+      - NATS_URL=nats://nats:4222
+      - JWT_SECRET=supersecretjwt
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
+      - DISCORD_BOT_TOKEN=${DISCORD_BOT_TOKEN:-}
+    volumes:
+      # Mount source code for hot reload
+      - ./backend:/app
+      - /app/tmp
+      - /app/vendor
+    networks:
+      - earniqa-network
+    depends_on:
+      db:
+        condition: service_healthy
+      nats:
+        condition: service_started
+      migrate:
+        condition: service_completed_successfully
+    command: air -c .air.dunning-worker.toml
+    restart: unless-stopped
+    # Resource limits for 8GB RAM Mac
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 256M
+
+  # Dispute Worker (handles refunds and disputes, saves evidence)
+  dispute-worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.dev
+    container_name: earniqa-dispute-worker-dev
+    environment:
+      - DB_DRIVER=mysql
+      - MYSQL_DSN=earniqa:earniqa@tcp(db:3306)/earniqa?parseTime=true&loc=Local&charset=utf8mb4&collation=utf8mb4_unicode_ci
+      - NATS_URL=nats://nats:4222
+      - JWT_SECRET=supersecretjwt
+    volumes:
+      # Mount source code for hot reload
+      - ./backend:/app
+      - /app/tmp
+      - /app/vendor
+      # Persistent volume for evidence storage
+      - dispute_evidence_data:/app/data/evidence
+    networks:
+      - earniqa-network
+    depends_on:
+      db:
+        condition: service_healthy
+      nats:
+        condition: service_started
+      migrate:
+        condition: service_completed_successfully
+    command: air -c .air.dispute-worker.toml
+    restart: unless-stopped
+    # Resource limits for 8GB RAM Mac
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 256M
+
+  # Telegram Bot (handles Telegram bot commands and interactions)
+  telegram-bot:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.dev
+    container_name: earniqa-telegram-bot-dev
+    environment:
+      - DB_DRIVER=mysql
+      - MYSQL_DSN=earniqa:earniqa@tcp(db:3306)/earniqa?parseTime=true&loc=Local&charset=utf8mb4&collation=utf8mb4_unicode_ci
+      - NATS_URL=nats://nats:4222
+      - JWT_SECRET=supersecretjwt
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
+      - BACKEND_BASE_URL=${BACKEND_BASE_URL:-http://localhost:8080}
+    volumes:
+      # Mount source code for hot reload
+      - ./backend:/app
+      - /app/tmp
+      - /app/vendor
+    networks:
+      - earniqa-network
+    depends_on:
+      db:
+        condition: service_healthy
+      nats:
+        condition: service_started
+      migrate:
+        condition: service_completed_successfully
+    command: air -c .air.telegram-bot.toml
+    restart: unless-stopped
+    # Resource limits for 8GB RAM Mac
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 256M
+
+  # Mailpit - Local Email Testing (like Mailgun but local)
+  mailpit:
+    image: axllent/mailpit:latest
+    container_name: earniqa-mailpit-dev
+    ports:
+      - "1025:1025"  # SMTP server
+      - "8025:8025"  # Web UI
+    networks:
+      - earniqa-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8025/api/v1/messages"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
 
 networks:
   earniqa-network:
@@ -126,4 +375,6 @@ networks:
 
 volumes:
   mysql_data:
+  storage_data:
+  dispute_evidence_data:
 

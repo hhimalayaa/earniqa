@@ -40,8 +40,12 @@ services:
       - PORT=8080
       # Add your backend environment variables here
       # - STRIPE_SECRET_KEY=your-stripe-key
-      # - STRIPE_WEBHOOK_SECRET=your-webhook-secret
+      #       - STRIPE_WEBHOOK_SECRET=your-webhook-secret
       # - TELEGRAM_BOT_TOKEN=your-telegram-token
+      - STORAGE_PATH=/app/storage
+    volumes:
+      # Persistent storage for uploaded images
+      - storage_data:/app/storage
     networks:
       - earniqa-network
     depends_on:
@@ -113,4 +117,5 @@ networks:
 
 volumes:
   mysql_data:
+  storage_data:
 
